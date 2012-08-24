@@ -307,7 +307,9 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
             if (adjustedFont) {
                 CFAttributedStringSetAttribute((__bridge CFMutableAttributedStringRef)mutableAttributedString, updateRange, kCTFontAttributeName, adjustedFont);
                 CFRelease(adjustedFont);
-            }            
+            }
+
+            CFAttributedStringRemoveAttribute((__bridge CFMutableAttributedStringRef)mutableAttributedString, CFRangeMake(range.location, range.length), (__bridge CFStringRef)kTTTBaseFontFromLabelAttributeName);
         }
     }];
     
