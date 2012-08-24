@@ -113,7 +113,11 @@ static inline NSDictionary * NSAttributedStringAttributesFromLabel(TTTAttributed
     return [NSDictionary dictionaryWithDictionary:mutableAttributes];
 }
 
-static inline NSAttributedString * NSAttributedStringByScalingFontSize(NSAttributedString *attributedString, CGFloat scale, CGFloat minimumFontSize) {    
+static inline NSAttributedString * NSAttributedStringByScalingFontSize(NSAttributedString *attributedString, CGFloat scale, CGFloat minimumFontSize) {
+    if (scale == 1.0f) {
+        return attributedString;
+    }
+    
     NSMutableAttributedString *mutableAttributedString = [attributedString mutableCopy];
     [mutableAttributedString enumerateAttribute:(NSString *)kCTFontAttributeName inRange:NSMakeRange(0, [mutableAttributedString length]) options:0 usingBlock:^(id value, NSRange range, BOOL *stop) {
         CTFontRef font = (__bridge CTFontRef)value;
@@ -148,6 +152,10 @@ static inline NSAttributedString * NSAttributedStringBySettingColorFromContext(N
 }
 
 static inline BOOL CTFontContainsSuffix(CTFontRef font, NSString *suffix) {
+    if (!font) {
+        return NO;
+    }
+    
     NSString *familyName = CFBridgingRelease(CTFontCopyName(font, kCTFontFamilyNameKey));
     NSString *fontName = CFBridgingRelease(CTFontCopyName(font, kCTFontNameAttribute));
 
@@ -166,6 +174,10 @@ static inline BOOL CTFontContainsSuffix(CTFontRef font, NSString *suffix) {
 }
 
 static inline CTFontRef CTFontCreateCopyWithStyleSuffix(CTFontRef font, NSString *suffix) {
+    if (!font) {
+        return NULL;
+    }
+    
     NSString *returnFontName = nil;
     NSString *familyName = CFBridgingRelease(CTFontCopyName(font, kCTFontFamilyNameKey));
 
@@ -195,11 +207,15 @@ static inline CTFontRef CTFontCreateCopyWithStyleSuffix(CTFontRef font, NSString
 }
 
 static inline CTFontRef CTFontCreateCopyWithStyleSuffixes(CTFontRef font, NSArray *suffixes) {
+    if (!font) {
+        return NULL;
+    }
+    
     for (NSString *suffix in suffixes) {
-        CTFontRef font = CTFontCreateCopyWithStyleSuffix(font, suffix);
+        CTFontRef styledFont = CTFontCreateCopyWithStyleSuffix(font, suffix);
         
-        if (font) {
-            return font;
+        if (styledFont) {
+            return styledFont;
         }
     }
     
@@ -207,6 +223,11 @@ static inline CTFontRef CTFontCreateCopyWithStyleSuffixes(CTFontRef font, NSArra
 }
 
 static inline CTFontRef CTFontCreateCopyFromBaseFont(CTFontRef font, CTFontRef baseFont) {
+    if (!font) {
+        CFRetain(baseFont);
+        return baseFont;
+    }
+    
     BOOL isBold = NO;
     BOOL isItalic = NO;
     NSArray *boldItalicSuffixes = [NSArray arrayWithObjects:@"BoldItalic", @"BoldOblique", @"BlackItalic", nil];
@@ -273,18 +294,16 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
         if (usesFontFromLabel && CFBooleanGetValue(usesFontFromLabel)) {
             CFRange updateRange;
             NSRange effectiveRange;
-            CTFontRef adjustedFont = NULL;
 
             CTFontRef currentFont = (__bridge CTFontRef)[mutableAttributedString attribute:(NSString *)kCTFontAttributeName atIndex:range.location effectiveRange:&effectiveRange];            
             if (currentFont) {
                 updateRange = CFRangeMake(effectiveRange.location, effectiveRange.length);
-                adjustedFont = CTFontCreateCopyFromBaseFont(currentFont, baseFontRef);
             } else {
                 updateRange = CFRangeMake(range.location, range.length);                
-                adjustedFont = CFRetain(baseFontRef);
             }
             
             // There's a chance the adjusted font could have come back as NULL if we couldn't find a sylized version of the base font
+            CTFontRef adjustedFont = CTFontCreateCopyFromBaseFont(currentFont, baseFontRef);
             if (adjustedFont) {
                 CFAttributedStringSetAttribute((__bridge CFMutableAttributedStringRef)mutableAttributedString, updateRange, kCTFontAttributeName, adjustedFont);
                 CFRelease(adjustedFont);
@@ -305,6 +324,7 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
 @property (readwrite, nonatomic, strong) NSDataDetector *dataDetector;
 @property (readwrite, nonatomic, strong) NSArray *links;
 @property (readwrite, nonatomic, strong) NSTextCheckingResult *activeLink;
+@property (readwrite, nonatomic, assign) CGFloat textScaleFactor;
 
 - (void)commonInit;
 - (void)setNeedsFramesetter;
@@ -340,6 +360,7 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
 @synthesize textInsets = _textInsets;
 @synthesize verticalAlignment = _verticalAlignment;
 @synthesize activeLink = _activeLink;
+@synthesize textScaleFactor = _textScaleFactor;
 
 - (id)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
@@ -378,6 +399,7 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
     self.activeLinkAttributes = [NSDictionary dictionaryWithDictionary:mutableActiveLinkAttributes];
     
     self.textInsets = UIEdgeInsetsZero;
+    self.textScaleFactor = 1.0f;
     
     self.userInteractionEnabled = YES;
     self.multipleTouchEnabled = NO;
@@ -432,10 +454,22 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
         // Inherit the label's textColor
         adjustedString = NSAttributedStringBySettingColorFromContext(adjustedString, self.textColor);
         
+        // Adjust the the scale for drawing
+        adjustedString = NSAttributedStringByScalingFontSize(adjustedString, self.textScaleFactor, self.minimumFontSize);
+        
         self.renderedAttributedText = adjustedString;
     }
     
     return _renderedAttributedText;
+}
+
+- (void)setTextScaleFactor:(CGFloat)textScaleFactor {
+    if (textScaleFactor != _textScaleFactor) {
+        _textScaleFactor = textScaleFactor;
+        
+        // Give the rendered text a chance to regenerate, but don't redraw since this is an internal adjustment method
+        [self setNeedsFramesetter];
+    }
 }
 
 #pragma mark -
@@ -557,7 +591,7 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
 
     CGMutablePathRef path = CGPathCreateMutable();
     CGPathAddRect(path, NULL, textRect);
-    CTFrameRef frame = CTFramesetterCreateFrame(self.framesetter, CFRangeMake(0, [self.attributedText length]), path, NULL);
+    CTFrameRef frame = CTFramesetterCreateFrame(self.framesetter, CFRangeMake(0, [self.renderedAttributedText length]), path, NULL);
     if (frame == NULL) {
         CFRelease(path);
         return NSNotFound;
@@ -846,14 +880,14 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
 }
 
 - (CGRect)textRectForBounds:(CGRect)bounds limitedToNumberOfLines:(NSInteger)numberOfLines {
-    if (!self.attributedText) {
+    if (!self.renderedAttributedText) {
         return [super textRectForBounds:bounds limitedToNumberOfLines:numberOfLines];
     }
         
     CGRect textRect = bounds;
     
     // Adjust the text to be in the center vertically, if the text size is smaller than bounds
-    CGSize textSize = CTFramesetterSuggestFrameSizeWithConstraints(self.framesetter, CFRangeMake(0, [self.attributedText length]), NULL, bounds.size, NULL);
+    CGSize textSize = CTFramesetterSuggestFrameSizeWithConstraints(self.framesetter, CFRangeMake(0, [self.renderedAttributedText length]), NULL, bounds.size, NULL);
     textSize = CGSizeMake(ceilf(textSize.width), ceilf(textSize.height)); // Fix for iOS 4, CTFramesetterSuggestFrameSizeWithConstraints sometimes returns fractional sizes
     
     if (textSize.height < textRect.size.height) {
@@ -879,13 +913,11 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
 }
 
 - (void)drawTextInRect:(CGRect)rect {
-    if (!self.attributedText) {
+    if (!self.renderedAttributedText) {
         [super drawTextInRect:rect];
         return;
     }
         
-    NSAttributedString *originalAttributedText = nil;
-    
     // Adjust the font size to fit width, if necessarry 
     if (self.adjustsFontSizeToFitWidth && self.numberOfLines > 0) {
         CGFloat textWidth = [self sizeThatFits:CGSizeZero].width;
@@ -895,9 +927,12 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
         }
         
         if (textWidth > availableWidth && textWidth > 0.0f) {
-            originalAttributedText = [self.attributedText copy];
-            self.text = NSAttributedStringByScalingFontSize(self.attributedText, availableWidth / textWidth, self.minimumFontSize);
+            self.textScaleFactor = (availableWidth / textWidth);
+        } else {
+            self.textScaleFactor = 1.0f;            
         }
+    } else {
+        self.textScaleFactor = 1.0f;
     }
     
     CGContextRef c = UIGraphicsGetCurrentContext();
@@ -907,7 +942,7 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
     CGContextTranslateCTM(c, 0.0f, rect.size.height);
     CGContextScaleCTM(c, 1.0f, -1.0f);
     
-    CFRange textRange = CFRangeMake(0, [self.attributedText length]);
+    CFRange textRange = CFRangeMake(0, [self.renderedAttributedText length]);
 
     // First, get the text rect (which takes vertical centering into account)
     CGRect textRect = [self textRectForBounds:rect limitedToNumberOfLines:self.numberOfLines];
@@ -934,19 +969,17 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
     }  
     
     // If we adjusted the font size, set it back to its original size
-    if (originalAttributedText) {
-        self.text = originalAttributedText;
-    }
+    self.textScaleFactor = 1.0f;
 }
 
 #pragma mark - UIView
 
 - (CGSize)sizeThatFits:(CGSize)size {
-    if (!self.attributedText) {
+    if (!self.renderedAttributedText) {
         return [super sizeThatFits:size];
     }
     
-    CFRange rangeToSize = CFRangeMake(0, [self.attributedText length]);
+    CFRange rangeToSize = CFRangeMake(0, [self.renderedAttributedText length]);
     CGSize constraints = CGSizeMake(size.width, CGFLOAT_MAX);
     
     if (self.numberOfLines == 1) {
