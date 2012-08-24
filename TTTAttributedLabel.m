@@ -25,6 +25,7 @@
 #define kTTTLineBreakWordWrapTextWidthScalingFactor (M_PI / M_E)
 
 NSString * const kTTTStrikeOutAttributeName = @"TTTStrikeOutAttribute";
+NSString * const kTTTBaseFontFromLabelAttributeName = @"TTTBaseFontFromLabelAttributeName";
 
 static inline CTTextAlignment CTTextAlignmentFromUITextAlignment(UITextAlignment alignment) {
 	switch (alignment) {
@@ -89,8 +90,7 @@ static inline NSDictionary * NSAttributedStringAttributesFromLabel(TTTAttributed
     CTLineBreakMode lineBreakMode;
     if (label.numberOfLines != 1) {
         lineBreakMode = CTLineBreakModeFromUILineBreakMode(UILineBreakModeWordWrap);
-    }
-    else {
+    } else {
         lineBreakMode = CTLineBreakModeFromUILineBreakMode(label.lineBreakMode);
     }
 	
@@ -145,6 +145,155 @@ static inline NSAttributedString * NSAttributedStringBySettingColorFromContext(N
     }];
     
     return mutableAttributedString;    
+}
+
+static inline BOOL CTFontContainsSuffix(CTFontRef font, NSString *suffix) {
+    NSString *familyName = CFBridgingRelease(CTFontCopyName(font, kCTFontFamilyNameKey));
+    NSString *fontName = CFBridgingRelease(CTFontCopyName(font, kCTFontNameAttribute));
+
+    // Special case for system font
+    if ([familyName isEqual:@".Helvetica NeueUI"]) {
+        if ([suffix isEqual:@"Medium"]) {
+            return [fontName isEqual:@".Helvetica NeueUI"];
+        } else {
+            return ([suffix length] == 0 || [fontName rangeOfString:suffix].length > 0);
+        }
+    } else {
+        return ([suffix length] == 0 || [fontName rangeOfString:suffix].length > 0);
+    }
+    
+    return NO;
+}
+
+static inline CTFontRef CTFontCreateCopyWithStyleSuffix(CTFontRef font, NSString *suffix) {
+    NSString *returnFontName = nil;
+    NSString *familyName = CFBridgingRelease(CTFontCopyName(font, kCTFontFamilyNameKey));
+
+    // Special case for system font
+    if ([familyName isEqual:@".Helvetica NeueUI"]) {
+        if ([suffix isEqual:@"Medium"]) {
+            returnFontName = @".HelveticaNeueUI";
+        } else {
+            returnFontName = [@".HelveticaNeueUI-" stringByAppendingString:suffix];
+        }
+    } else {
+        for (NSString *fontName in [UIFont fontNamesForFamilyName:familyName]) {
+            if (suffix.length == 0 || [fontName rangeOfString:suffix].length > 0) {
+                if (returnFontName == nil || fontName.length < returnFontName.length) {
+                    returnFontName = fontName;
+                }
+            }
+        }
+    }
+    
+    CTFontRef returnFont = NULL;
+    if (returnFontName) {
+        returnFont = CTFontCreateWithName((__bridge CFStringRef)returnFontName, CTFontGetSize(font), NULL);
+    }
+    
+    return returnFont;
+}
+
+static inline CTFontRef CTFontCreateCopyWithStyleSuffixes(CTFontRef font, NSArray *suffixes) {
+    for (NSString *suffix in suffixes) {
+        CTFontRef font = CTFontCreateCopyWithStyleSuffix(font, suffix);
+        
+        if (font) {
+            return font;
+        }
+    }
+    
+    return NULL;
+}
+
+static inline CTFontRef CTFontCreateCopyFromBaseFont(CTFontRef font, CTFontRef baseFont) {
+    BOOL isBold = NO;
+    BOOL isItalic = NO;
+    NSArray *boldItalicSuffixes = [NSArray arrayWithObjects:@"BoldItalic", @"BoldOblique", @"BlackItalic", nil];
+    NSArray *boldSuffixes = nil;
+    NSArray *italicSuffixes = nil;
+    CTFontRef adjustedfont = NULL;
+
+    // Check for Bold & Italic first
+    for (NSString *suffix in boldItalicSuffixes) {
+        if (CTFontContainsSuffix(font, suffix)) {
+            isBold = YES;
+            isItalic = YES;
+            break;
+        }
+    }
+
+    if (!isBold && !isItalic) {
+        boldSuffixes = [NSArray arrayWithObjects:@"Bold", @"Black", nil];
+        
+        // If that fails, check for Bold
+        for (NSString *suffix in boldSuffixes) {
+            if (CTFontContainsSuffix(font, suffix)) {
+                isBold = YES;
+                break;
+            }
+        }
+        
+        // If that fails, check for Italic
+        if (!isBold) {
+            italicSuffixes = [NSArray arrayWithObjects:@"Italic", @"Oblique", nil];
+            
+            for (NSString *suffix in italicSuffixes) {
+                if (CTFontContainsSuffix(font, suffix)) {
+                    isItalic = YES;
+                    break;
+                }
+            }            
+        }
+    }
+
+    if (isBold && isItalic) {
+        adjustedfont = CTFontCreateCopyWithStyleSuffixes(baseFont, boldItalicSuffixes);
+    } else if (isBold) {
+        adjustedfont = CTFontCreateCopyWithStyleSuffixes(baseFont, boldSuffixes);
+    } else if (isItalic) {
+        adjustedfont = CTFontCreateCopyWithStyleSuffixes(baseFont, italicSuffixes);
+    } else {
+        NSArray *normalSuffixes = [NSArray arrayWithObjects:@"Medium", @"", nil];
+        adjustedfont = CTFontCreateCopyWithStyleSuffixes(baseFont, normalSuffixes);
+    }
+    
+    return adjustedfont;
+}
+
+static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(NSAttributedString *attributedString, UIFont *baseFont) {
+    if (!baseFont) {
+        return attributedString;
+    }
+    
+    CTFontRef baseFontRef = CTFontCreateWithName((__bridge CFStringRef)baseFont.fontName, baseFont.pointSize, NULL);
+    NSMutableAttributedString *mutableAttributedString = [attributedString mutableCopy];
+    [mutableAttributedString enumerateAttribute:kTTTBaseFontFromLabelAttributeName inRange:NSMakeRange(0, [mutableAttributedString length]) options:0 usingBlock:^(id value, NSRange range, BOOL *stop) {
+        CFBooleanRef usesFontFromLabel = (__bridge CFBooleanRef)value;
+        if (usesFontFromLabel && CFBooleanGetValue(usesFontFromLabel)) {
+            CFRange updateRange;
+            NSRange effectiveRange;
+            CTFontRef adjustedFont = NULL;
+
+            CTFontRef currentFont = (__bridge CTFontRef)[mutableAttributedString attribute:(NSString *)kCTFontAttributeName atIndex:range.location effectiveRange:&effectiveRange];            
+            if (currentFont) {
+                updateRange = CFRangeMake(effectiveRange.location, effectiveRange.length);
+                adjustedFont = CTFontCreateCopyFromBaseFont(currentFont, baseFontRef);
+            } else {
+                updateRange = CFRangeMake(range.location, range.length);                
+                adjustedFont = CFRetain(baseFontRef);
+            }
+            
+            // There's a chance the adjusted font could have come back as NULL if we couldn't find a sylized version of the base font
+            if (adjustedFont) {
+                CFAttributedStringSetAttribute((__bridge CFMutableAttributedStringRef)mutableAttributedString, updateRange, kCTFontAttributeName, adjustedFont);
+                CFRelease(adjustedFont);
+            }            
+        }
+    }];
+    
+    CFRelease(baseFontRef);
+    return mutableAttributedString;
 }
 
 @interface TTTAttributedLabel ()
@@ -277,7 +426,13 @@ static inline NSAttributedString * NSAttributedStringBySettingColorFromContext(N
 
 - (NSAttributedString *)renderedAttributedText {
     if (!_renderedAttributedText) {
-        self.renderedAttributedText = NSAttributedStringBySettingColorFromContext(self.attributedText, self.textColor);
+        // Inherit the label's font
+        NSAttributedString *adjustedString = NSAttributedStringBySettingFontFromBaseFont(self.attributedText, self.font);
+        
+        // Inherit the label's textColor
+        adjustedString = NSAttributedStringBySettingColorFromContext(adjustedString, self.textColor);
+        
+        self.renderedAttributedText = adjustedString;
     }
     
     return _renderedAttributedText;
@@ -607,6 +762,7 @@ static inline NSAttributedString * NSAttributedStringBySettingColorFromContext(N
                 CGContextAddLineToPoint(c, runBounds.origin.x + runBounds.size.width, y);
                 
                 CGContextStrokePath(c);
+                CFRelease(font);
             }
         }
         
@@ -673,6 +829,17 @@ static inline NSAttributedString * NSAttributedStringBySettingColorFromContext(N
 
     // Redraw to allow any ColorFromContext attributes a chance to update
     if (textColor != oldTextColor) {
+        [self setNeedsFramesetter];
+        [self setNeedsDisplay];
+    }
+}
+
+- (void)setFont:(UIFont *)font {
+    UIFont *oldFont = self.font;
+    [super setFont:font];
+    
+    // Redraw to allow any BaseFontFromLabel attributes a chance to update
+    if (font != oldFont) {
         [self setNeedsFramesetter];
         [self setNeedsDisplay];
     }
