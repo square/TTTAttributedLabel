@@ -76,7 +76,7 @@ static inline NSDictionary * NSAttributedStringAttributesFromLabel(TTTAttributed
     [mutableAttributes setObject:(__bridge id)font forKey:(NSString *)kCTFontAttributeName];
     CFRelease(font);
     
-    [mutableAttributes setObject:(id)[label.textColor CGColor] forKey:(NSString *)kCTForegroundColorAttributeName];
+    [mutableAttributes setObject:@(YES) forKey:(NSString *)kCTForegroundColorFromContextAttributeName];
     
     CTTextAlignment alignment = CTTextAlignmentFromUITextAlignment(label.textAlignment);
     CGFloat lineSpacing = label.leading;
@@ -317,6 +317,22 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
     return mutableAttributedString;
 }
 
+// TODO: Kill this once we have font inheritance working.
+static inline NSAttributedString * NSAttributedStringByReplacingFontWithFont(NSAttributedString *attributedString, UIFont *font) {
+    if (!font) {
+        return attributedString;
+    }
+    
+    CTFontRef fontRef = CTFontCreateWithName((__bridge CFStringRef)font.fontName, font.pointSize, NULL);
+    NSMutableAttributedString *mutableAttributedString = [attributedString mutableCopy];
+    [mutableAttributedString enumerateAttribute:(NSString *)kCTFontAttributeName inRange:NSMakeRange(0, [mutableAttributedString length]) options:0 usingBlock:^(id value, NSRange range, BOOL *stop) {
+        CFAttributedStringSetAttribute((__bridge CFMutableAttributedStringRef)mutableAttributedString, CFRangeMake(range.location, range.length), kCTFontAttributeName, fontRef);
+    }];
+    
+    CFRelease(fontRef);
+    return mutableAttributedString;
+}
+
 @interface TTTAttributedLabel ()
 @property (readwrite, nonatomic, copy) NSAttributedString *attributedText;
 @property (readwrite, nonatomic, copy) NSAttributedString *inactiveAttributedText;
@@ -327,9 +343,11 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
 @property (readwrite, nonatomic, strong) NSArray *links;
 @property (readwrite, nonatomic, strong) NSTextCheckingResult *activeLink;
 @property (readwrite, nonatomic, assign) CGFloat textScaleFactor;
+@property (readwrite, nonatomic, assign) BOOL plainText;
 
 - (void)commonInit;
 - (void)setNeedsFramesetter;
+- (void)setTextAndParseLinks:(NSAttributedString *)attributedText;
 - (NSArray *)detectedLinksInString:(NSString *)string range:(NSRange)range error:(NSError **)error;
 - (NSTextCheckingResult *)linkAtCharacterIndex:(CFIndex)idx;
 - (NSTextCheckingResult *)linkAtPoint:(CGPoint)p;
@@ -363,6 +381,7 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
 @synthesize verticalAlignment = _verticalAlignment;
 @synthesize activeLink = _activeLink;
 @synthesize textScaleFactor = _textScaleFactor;
+@synthesize plainText = _plainText;
 
 - (id)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
@@ -811,24 +830,28 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
 - (void)setText:(id)text {
     if ([text isKindOfClass:[NSString class]]) {
         [self setText:text afterInheritingLabelAttributesAndConfiguringWithBlock:nil];
-        return;
+    } else if ([text isKindOfClass:[NSAttributedString class]]) {
+        [self setTextAndParseLinks:text];
     }
-    
-    self.attributedText = text;
+}
 
+- (void)setTextAndParseLinks:(NSAttributedString *)attributedText {
+    self.attributedText = attributedText;
+    
     self.links = [NSArray array];
     if (self.dataDetectorTypes != UIDataDetectorTypeNone) {
-        for (NSTextCheckingResult *result in [self detectedLinksInString:[self.attributedText string] range:NSMakeRange(0, [text length]) error:nil]) {
+        for (NSTextCheckingResult *result in [self detectedLinksInString:[self.attributedText string] range:NSMakeRange(0, [attributedText length]) error:nil]) {
             [self addLinkWithTextCheckingResult:result];
         }
     }
-        
-    [super setText:[self.attributedText string]];
+    
+    [super setText:[self.attributedText string]];    
 }
 
 - (void)setText:(id)text afterInheritingLabelAttributesAndConfiguringWithBlock:(NSMutableAttributedString *(^)(NSMutableAttributedString *mutableAttributedString))block {    
     NSMutableAttributedString *mutableAttributedString = nil;
     if ([text isKindOfClass:[NSString class]]) {
+        self.plainText = YES;
         mutableAttributedString = [[NSMutableAttributedString alloc] initWithString:text attributes:NSAttributedStringAttributesFromLabel(self)];
     } else {
         mutableAttributedString = [[NSMutableAttributedString alloc] initWithAttributedString:text];
@@ -839,7 +862,7 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
         mutableAttributedString = block(mutableAttributedString);
     }
     
-    [self setText:mutableAttributedString];
+    [self setTextAndParseLinks:mutableAttributedString];
 }
 
 #pragma mark - UILabel
@@ -873,9 +896,14 @@ static inline NSAttributedString * NSAttributedStringBySettingFontFromBaseFont(N
 - (void)setFont:(UIFont *)font {
     UIFont *oldFont = self.font;
     [super setFont:font];
-    
+        
     // Redraw to allow any BaseFontFromLabel attributes a chance to update
     if (font != oldFont) {
+        // TODO: Kill this once we have font inheritance working.
+        if (self.plainText) {
+            [self setTextAndParseLinks:NSAttributedStringByReplacingFontWithFont(self.attributedText, font)];
+        }
+        
         [self setNeedsFramesetter];
         [self setNeedsDisplay];
     }
