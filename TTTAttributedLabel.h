@@ -37,6 +37,11 @@ typedef enum {
  */
 extern NSString * const kTTTStrikeOutAttributeName;
 
+/**
+ Determines whether the text to which this attribute applies should in inherit the font family and point size of the label, but maintain bold and italic styling.
+ */
+extern NSString * const kTTTBaseFontFromLabelAttributeName;
+
 @protocol TTTAttributedLabelDelegate;
 
 // Override UILabel @property to accept both NSString and NSAttributedString
