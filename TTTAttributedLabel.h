@@ -183,7 +183,7 @@ extern NSString * const kTTTBaseFontFromLabelAttributeName;
 /**
  A copy of the label's current attributedText. This returns `nil` if an attributed string has never been set on the label.
  */
-@property (readonly, nonatomic, copy) NSAttributedString *attributedText;
+@property (nonatomic, copy) NSAttributedString *attributedText;
 
 ///-------------------
 /// @name Adding Links

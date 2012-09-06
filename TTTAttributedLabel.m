@@ -334,7 +334,6 @@ static inline NSAttributedString * NSAttributedStringByReplacingFontWithFont(NSA
 }
 
 @interface TTTAttributedLabel ()
-@property (readwrite, nonatomic, copy) NSAttributedString *attributedText;
 @property (readwrite, nonatomic, copy) NSAttributedString *inactiveAttributedText;
 @property (readwrite, nonatomic, copy) NSAttributedString *renderedAttributedText;
 @property (readwrite, nonatomic, assign) CTFramesetterRef framesetter;
