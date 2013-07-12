@@ -69,7 +69,7 @@ static inline NSTextCheckingType NSTextCheckingTypeFromUIDataDetectorType(UIData
     return textCheckingType;
 }
 
-static inline NSDictionary * NSAttributedStringAttributesFromLabel(TTTAttributedLabel *label) {
+static inline NSMutableDictionary * NSAttributedStringAttributesFromLabel(TTTAttributedLabel *label) {
     NSMutableDictionary *mutableAttributes = [NSMutableDictionary dictionary]; 
     
     CTFontRef font = CTFontCreateWithName((__bridge CFStringRef)label.font.fontName, label.font.pointSize, NULL);
@@ -110,7 +110,7 @@ static inline NSDictionary * NSAttributedStringAttributesFromLabel(TTTAttributed
 	[mutableAttributes setObject:(__bridge id)paragraphStyle forKey:(NSString *)kCTParagraphStyleAttributeName];
 	CFRelease(paragraphStyle);
     
-    return [NSDictionary dictionaryWithDictionary:mutableAttributes];
+    return mutableAttributes;
 }
 
 static inline NSAttributedString * NSAttributedStringByScalingFontSize(NSAttributedString *attributedString, CGFloat scale, CGFloat minimumFontSize) {
@@ -853,8 +853,13 @@ static inline NSAttributedString * NSAttributedStringByReplacingFontWithFont(NSA
         self.plainText = YES;
         mutableAttributedString = [[NSMutableAttributedString alloc] initWithString:text attributes:NSAttributedStringAttributesFromLabel(self)];
     } else {
-        mutableAttributedString = [[NSMutableAttributedString alloc] initWithAttributedString:text];
-        [mutableAttributedString addAttributes:NSAttributedStringAttributesFromLabel(self) range:NSMakeRange(0, [mutableAttributedString length])];
+        // Only replace attributes that aren't already specified in the supplied string.
+        NSMutableDictionary *attributesToInherit = NSAttributedStringAttributesFromLabel(self);
+        NSDictionary *existingAttributes = [text attributesAtIndex:0 effectiveRange:NULL];
+        [attributesToInherit removeObjectsForKeys:existingAttributes.allKeys];
+        
+        mutableAttributedString = [text mutableCopy];
+        [mutableAttributedString addAttributes:attributesToInherit range:NSMakeRange(0, [mutableAttributedString length])];
     }
     
     if (block) {
@@ -913,29 +918,20 @@ static inline NSAttributedString * NSAttributedStringByReplacingFontWithFont(NSA
         return [super textRectForBounds:bounds limitedToNumberOfLines:numberOfLines];
     }
         
-    CGRect textRect = bounds;
+    CGRect textRect;
+    textRect.origin = bounds.origin;
     
-    // Adjust the text to be in the center vertically, if the text size is smaller than bounds
-    CGSize textSize = CTFramesetterSuggestFrameSizeWithConstraints(self.framesetter, CFRangeMake(0, [self.renderedAttributedText length]), NULL, bounds.size, NULL);
-    textSize = CGSizeMake(ceilf(textSize.width), ceilf(textSize.height)); // Fix for iOS 4, CTFramesetterSuggestFrameSizeWithConstraints sometimes returns fractional sizes
+    // Measure the size with CoreText.
+    textRect.size = CTFramesetterSuggestFrameSizeWithConstraints(self.framesetter, CFRangeMake(0, [self.renderedAttributedText length]), NULL, bounds.size, NULL);
+    textRect.size = CGSizeMake(ceilf(CGRectGetWidth(textRect)), ceilf(CGRectGetHeight(textRect)));  // Fix for iOS 4, CTFramesetterSuggestFrameSizeWithConstraints sometimes returns fractional sizes
     
-    if (textSize.height < textRect.size.height) {
-        CGFloat heightChange = (textRect.size.height - textSize.height);
-        CGFloat yOffset = 0.0f;
-        switch (self.verticalAlignment) {
-            case TTTAttributedLabelVerticalAlignmentTop:
-                heightChange = 0.0f;
-                break;
-            case TTTAttributedLabelVerticalAlignmentCenter:
-                yOffset = floorf((textRect.size.height - textSize.height) / 2.0f);
-                break;
-            case TTTAttributedLabelVerticalAlignmentBottom:
-                yOffset = textRect.size.height - textSize.height;
-                break;
+    // Take vertical alignment into account.
+    if (CGRectGetHeight(bounds) != CGFLOAT_MAX && CGRectGetHeight(textRect) < CGRectGetHeight(bounds)) {
+        if (self.verticalAlignment == TTTAttributedLabelVerticalAlignmentCenter) {
+            textRect.origin.y = floorf(CGRectGetMidY(bounds) - CGRectGetHeight(textRect) / 2.0f);
+        } else if (self.verticalAlignment == TTTAttributedLabelVerticalAlignmentBottom) {
+            textRect.origin.y = CGRectGetMaxY(bounds) - CGRectGetHeight(textRect);
         }
-        
-        textRect.origin.y += yOffset;
-        textRect.size = CGSizeMake(textRect.size.width, textRect.size.height - heightChange + yOffset);
     }
     
     return textRect;
