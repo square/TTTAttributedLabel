@@ -36,21 +36,21 @@ NSString * const kTTTBackgroundCornerRadiusAttributeName = @"TTTBackgroundCorner
 
 static inline CTTextAlignment CTTextAlignmentFromUITextAlignment(NSTextAlignment alignment) {
 	switch (alignment) {
-		case UITextAlignmentLeft: return kCTLeftTextAlignment;
-		case UITextAlignmentCenter: return kCTCenterTextAlignment;
-		case UITextAlignmentRight: return kCTRightTextAlignment;
+		case NSTextAlignmentLeft: return kCTLeftTextAlignment;
+		case NSTextAlignmentCenter: return kCTCenterTextAlignment;
+		case NSTextAlignmentRight: return kCTRightTextAlignment;
 		default: return kCTNaturalTextAlignment;
 	}
 }
 
 static inline CTLineBreakMode CTLineBreakModeFromUILineBreakMode(NSLineBreakMode lineBreakMode) {
 	switch (lineBreakMode) {
-		case UILineBreakModeWordWrap: return kCTLineBreakByWordWrapping;
-		case UILineBreakModeCharacterWrap: return kCTLineBreakByCharWrapping;
-		case UILineBreakModeClip: return kCTLineBreakByClipping;
-		case UILineBreakModeHeadTruncation: return kCTLineBreakByTruncatingHead;
-		case UILineBreakModeTailTruncation: return kCTLineBreakByTruncatingTail;
-		case UILineBreakModeMiddleTruncation: return kCTLineBreakByTruncatingMiddle;
+		case NSLineBreakByWordWrapping: return kCTLineBreakByWordWrapping;
+		case NSLineBreakByCharWrapping: return kCTLineBreakByCharWrapping;
+		case NSLineBreakByClipping: return kCTLineBreakByClipping;
+		case NSLineBreakByTruncatingHead: return kCTLineBreakByTruncatingHead;
+		case NSLineBreakByTruncatingTail: return kCTLineBreakByTruncatingTail;
+		case NSLineBreakByTruncatingMiddle: return kCTLineBreakByTruncatingMiddle;
 		default: return 0;
 	}
 }
@@ -793,6 +793,8 @@ static inline NSAttributedString * NSAttributedStringBySettingColorFromContext(N
     [super setText:[self.attributedText string]];
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-implementations"
 - (void)setText:(id)text
 afterInheritingLabelAttributesAndConfiguringWithBlock:(NSMutableAttributedString *(^)(NSMutableAttributedString *mutableAttributedString))block
 {
@@ -810,6 +812,7 @@ afterInheritingLabelAttributesAndConfiguringWithBlock:(NSMutableAttributedString
     
     [self setText:mutableAttributedString];
 }
+#pragma clang diagnostic pop
 
 - (void)setActiveLink:(NSTextCheckingResult *)activeLink {
     _activeLink = activeLink;
